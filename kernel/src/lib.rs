@@ -50,6 +50,7 @@ mod events;
 mod fs;
 mod init;
 mod ipc;
+mod kvm;
 mod net;
 mod prelude;
 mod process;

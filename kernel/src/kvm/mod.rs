@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: MPL-2.0
+
+//! Kernel-based Virtual Machine support.
+
+pub(crate) mod arch;
+pub(crate) mod uapi;
