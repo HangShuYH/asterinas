@@ -39,6 +39,7 @@ mod error;
 mod ex_table;
 pub mod io;
 pub mod irq;
+pub mod kvm;
 pub mod log;
 pub mod mm;
 pub mod panic;

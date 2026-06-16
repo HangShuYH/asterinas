@@ -9,6 +9,7 @@ pub(crate) mod io;
 pub(crate) mod iommu;
 pub mod irq;
 pub mod kernel;
+pub(crate) mod kvm;
 pub(crate) mod mm;
 mod power;
 pub mod serial;
