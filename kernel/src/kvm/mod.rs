@@ -4,3 +4,4 @@
 
 pub(crate) mod arch;
 pub(crate) mod uapi;
+pub(crate) mod vm;

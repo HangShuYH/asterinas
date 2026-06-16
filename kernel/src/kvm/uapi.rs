@@ -7,6 +7,9 @@
 /// The Linux KVM API version implemented by Asterinas.
 pub(crate) const KVM_API_VERSION: i32 = 12;
 
+/// The mmap size required for each vCPU file.
+pub(crate) const KVM_VCPU_MMAP_SIZE: i32 = ostd::mm::PAGE_SIZE as i32;
+
 /// The ioctl magic used by Linux KVM.
 pub(crate) const KVMIO: u8 = 0xAE;
 
@@ -236,3 +239,4 @@ pub(crate) mod ioctl_defs {
 const _: () = assert!(size_of::<KvmUserspaceMemoryRegion>() == 32);
 const _: () = assert!(size_of::<KvmRunExit>() == 256);
 const _: () = assert!(size_of::<KvmRun>() == 2352);
+const _: () = assert!(size_of::<KvmRun>() <= KVM_VCPU_MMAP_SIZE as usize);

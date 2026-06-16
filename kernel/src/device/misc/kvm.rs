@@ -5,17 +5,22 @@
 //! This module registers the `/dev/kvm` device.
 
 use device_id::{DeviceId, MinorId};
+use ostd::task::Task;
 
 use crate::{
     device::{Device, DeviceType, DevtmpfsInodeMeta, registry::char},
     events::IoEvents,
     fs::{
-        file::{PerOpenFileOps, StatusFlags},
+        file::{PerOpenFileOps, StatusFlags, file_table::FdFlags},
         vfs::inode::FileOps,
+    },
+    kvm::{
+        uapi::{KVM_API_VERSION, KVM_VCPU_MMAP_SIZE, ioctl_defs},
+        vm::KvmVmFile,
     },
     prelude::*,
     process::signal::{PollHandle, Pollable},
-    util::ioctl::RawIoctl,
+    util::ioctl::{RawIoctl, dispatch_ioctl},
 };
 
 const KVM_MINOR: u32 = 232;
@@ -93,8 +98,37 @@ impl PerOpenFileOps for KvmFile {
     }
 
     fn ioctl(&self, raw_ioctl: RawIoctl) -> Result<i32> {
-        let _ = raw_ioctl;
-        return_errno_with_message!(Errno::ENOTTY, "the ioctl command is unknown");
+        use ioctl_defs::*;
+
+        dispatch_ioctl!(match raw_ioctl {
+            _cmd @ GetApiVersion => {
+                Ok(KVM_API_VERSION)
+            }
+            _cmd @ CreateVm => {
+                if raw_ioctl.arg() != 0 {
+                    return_errno_with_message!(Errno::EINVAL, "the VM type is not supported");
+                }
+
+                let vm_file = Arc::new(KvmVmFile::new());
+                let current_task = Task::current().unwrap();
+                let thread_local = current_task.as_thread_local().unwrap();
+                let fd = {
+                    let file_table = thread_local.borrow_file_table();
+                    let mut file_table_locked = file_table.unwrap().write();
+                    file_table_locked.insert(vm_file, FdFlags::empty())
+                };
+                Ok(fd.into())
+            }
+            _cmd @ CheckExtension => {
+                // Report no capabilities until each one has a complete ioctl implementation
+                // behind it.
+                Ok(0)
+            }
+            _cmd @ GetVcpuMmapSize => {
+                Ok(KVM_VCPU_MMAP_SIZE)
+            }
+            _ => return_errno_with_message!(Errno::ENOTTY, "the ioctl command is unknown"),
+        })
     }
 }
 
