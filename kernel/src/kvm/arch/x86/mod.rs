@@ -3,3 +3,4 @@
 //! x86 KVM support.
 
 pub(crate) mod uapi;
+pub(crate) mod vcpu;

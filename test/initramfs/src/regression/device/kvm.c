@@ -152,7 +152,76 @@ FN_TEST(kvm_create_vcpu)
 	int vcpu_fd = TEST_SUCC(ioctl(vm_fd, KVM_CREATE_VCPU, 0));
 	TEST_ERRNO(ioctl(vm_fd, KVM_CREATE_VCPU, 0), EINVAL);
 	TEST_ERRNO(ioctl(vm_fd, KVM_CREATE_VCPU, 1), EINVAL);
+	TEST_ERRNO(ioctl(vm_fd, KVM_RUN, 0), ENOTTY);
 	TEST_ERRNO(ioctl(vcpu_fd, KVM_CREATE_VCPU, 0), ENOTTY);
+	TEST_ERRNO(ioctl(vcpu_fd, KVM_RUN, 0), ENOTTY);
+	TEST_ERRNO(ioctl(vcpu_fd, 0, 0), ENOTTY);
+#ifdef KVM_GET_REGS
+	struct kvm_regs regs;
+	memset(&regs, 0, sizeof(regs));
+	TEST_ERRNO(ioctl(vm_fd, KVM_GET_REGS, &regs), ENOTTY);
+	TEST_SUCC(ioctl(vcpu_fd, KVM_GET_REGS, &regs));
+	TEST_RES(regs.rflags & 0x2, _ret == 0x2);
+	TEST_RES(regs.rip, _ret == 0xfff0);
+
+#ifdef KVM_SET_REGS
+	regs.rax = 0x12345678;
+	regs.rbx = 0x87654321;
+	regs.rip = 0x100000;
+	regs.rsp = 0x200000;
+	regs.rflags = 0x202;
+	TEST_SUCC(ioctl(vcpu_fd, KVM_SET_REGS, &regs));
+
+	struct kvm_regs readback;
+	memset(&readback, 0, sizeof(readback));
+	TEST_SUCC(ioctl(vcpu_fd, KVM_GET_REGS, &readback));
+	TEST_RES(readback.rax, _ret == regs.rax);
+	TEST_RES(readback.rbx, _ret == regs.rbx);
+	TEST_RES(readback.rip, _ret == regs.rip);
+	TEST_RES(readback.rsp, _ret == regs.rsp);
+	TEST_RES(readback.rflags, _ret == regs.rflags);
+#endif
+#endif
+
+#ifdef KVM_GET_SREGS
+	struct kvm_sregs sregs;
+	memset(&sregs, 0, sizeof(sregs));
+	TEST_ERRNO(ioctl(vm_fd, KVM_GET_SREGS, &sregs), ENOTTY);
+	TEST_SUCC(ioctl(vcpu_fd, KVM_GET_SREGS, &sregs));
+	TEST_RES(sregs.cs.selector, _ret == 0xf000);
+	TEST_RES(sregs.cs.base, _ret == 0xffff0000);
+	TEST_RES(sregs.cr0 & 0x10, _ret == 0x10);
+
+#ifdef KVM_SET_SREGS
+	sregs.cs.selector = 0x8;
+	sregs.cs.base = 0;
+	sregs.ds.selector = 0x10;
+	sregs.ds.base = 0;
+	sregs.cr3 = 0x3000;
+	sregs.cr4 = 0x20;
+	sregs.efer = 0x500;
+	sregs.gdt.base = 0x1000;
+	sregs.gdt.limit = 0x30;
+	sregs.idt.base = 0x2000;
+	sregs.idt.limit = 0x40;
+	TEST_SUCC(ioctl(vcpu_fd, KVM_SET_SREGS, &sregs));
+
+	struct kvm_sregs sregs_readback;
+	memset(&sregs_readback, 0, sizeof(sregs_readback));
+	TEST_SUCC(ioctl(vcpu_fd, KVM_GET_SREGS, &sregs_readback));
+	TEST_RES(sregs_readback.cs.selector, _ret == sregs.cs.selector);
+	TEST_RES(sregs_readback.cs.base, _ret == sregs.cs.base);
+	TEST_RES(sregs_readback.ds.selector, _ret == sregs.ds.selector);
+	TEST_RES(sregs_readback.cr3, _ret == sregs.cr3);
+	TEST_RES(sregs_readback.cr4, _ret == sregs.cr4);
+	TEST_RES(sregs_readback.efer, _ret == sregs.efer);
+	TEST_RES(sregs_readback.gdt.base, _ret == sregs.gdt.base);
+	TEST_RES(sregs_readback.idt.base, _ret == sregs.idt.base);
+
+	sregs.cr8 = 16;
+	TEST_ERRNO(ioctl(vcpu_fd, KVM_SET_SREGS, &sregs), EINVAL);
+#endif
+#endif
 
 	struct kvm_run *run =
 		TEST_SUCC(mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,

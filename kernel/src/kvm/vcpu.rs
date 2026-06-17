@@ -5,7 +5,11 @@
 use alloc::format;
 use core::fmt::Display;
 
-use super::{uapi::KVM_VCPU_MMAP_SIZE, vm::KvmVm};
+use super::{
+    arch,
+    uapi::{KVM_VCPU_MMAP_SIZE, ioctl_defs},
+    vm::KvmVm,
+};
 use crate::{
     events::IoEvents,
     fs::{
@@ -15,16 +19,43 @@ use crate::{
     },
     prelude::*,
     process::signal::{PollHandle, Pollable},
+    util::ioctl::{RawIoctl, dispatch_ioctl},
 };
 
 /// The maximum number of vCPUs supported by one VM.
 pub(crate) const KVM_MAX_VCPUS: u32 = 1;
 
+/// A KVM virtual CPU object shared by vCPU file handles.
+pub(crate) struct KvmVcpu {
+    id: u32,
+    #[expect(dead_code, reason = "keeps VM state alive for the vCPU lifetime")]
+    vm: Arc<KvmVm>,
+    arch: arch::KvmArchVcpu,
+}
+
+impl KvmVcpu {
+    fn new(id: u32, vm: Arc<KvmVm>) -> Self {
+        Self {
+            id,
+            vm,
+            arch: arch::KvmArchVcpu::new(),
+        }
+    }
+
+    /// Returns the vCPU id.
+    pub(crate) fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// Returns the architecture-specific vCPU state.
+    pub(crate) fn arch(&self) -> &arch::KvmArchVcpu {
+        &self.arch
+    }
+}
+
 /// A vCPU file handle created by `KVM_CREATE_VCPU`.
 pub(crate) struct KvmVcpuFile {
-    id: u32,
-    #[expect(dead_code, reason = "keeps VM state alive for the vCPU fd lifetime")]
-    vm: Arc<KvmVm>,
+    vcpu: Arc<KvmVcpu>,
     run_file: InodeHandle,
 }
 
@@ -38,7 +69,10 @@ impl KvmVcpuFile {
             InodeHandle::new_memfd(format!("kvm-vcpu:{}", id), MemfdFlags::MFD_NOEXEC_SEAL)?;
         run_file.resize(KVM_VCPU_MMAP_SIZE as usize)?;
 
-        Ok(Self { id, vm, run_file })
+        Ok(Self {
+            vcpu: Arc::new(KvmVcpu::new(id, vm)),
+            run_file,
+        })
     }
 }
 
@@ -59,6 +93,17 @@ impl FileLike for KvmVcpuFile {
 
     fn path(&self) -> &Path {
         self.run_file.path()
+    }
+
+    fn ioctl(&self, raw_ioctl: RawIoctl) -> Result<i32> {
+        use ioctl_defs::*;
+
+        dispatch_ioctl!(match raw_ioctl {
+            _cmd @ Run => {
+                return_errno_with_message!(Errno::ENOTTY, "KVM_RUN is not supported yet")
+            }
+            _ => arch::handle_vcpu_ioctl(&self.vcpu, raw_ioctl),
+        })
     }
 
     fn dump_proc_fdinfo(self: Arc<Self>, fd_flags: FdFlags) -> Box<dyn Display> {
@@ -85,7 +130,7 @@ impl FileLike for KvmVcpuFile {
 
         Box::new(FdInfo {
             flags,
-            id: self.id,
+            id: self.vcpu.id(),
             path: self.path().clone(),
         })
     }
