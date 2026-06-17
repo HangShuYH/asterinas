@@ -4,7 +4,13 @@
 
 use core::fmt::Display;
 
-use super::{memory::MemorySlotTable, uapi::ioctl_defs};
+use ostd::task::Task;
+
+use super::{
+    memory::MemorySlotTable,
+    uapi::ioctl_defs,
+    vcpu::{KVM_MAX_VCPUS, KvmVcpuFile},
+};
 use crate::{
     events::IoEvents,
     fs::{
@@ -19,7 +25,7 @@ use crate::{
 
 /// A VM file handle created by `KVM_CREATE_VM`.
 pub(crate) struct KvmVmFile {
-    inner: Mutex<KvmVmInner>,
+    vm: Arc<KvmVm>,
     pseudo_path: Path,
 }
 
@@ -29,20 +35,55 @@ impl KvmVmFile {
         let pseudo_path = AnonInodeFs::new_path(|_| "anon_inode:[kvm-vm]".to_string());
 
         Self {
-            inner: Mutex::new(KvmVmInner::new()),
+            vm: Arc::new(KvmVm::new()),
             pseudo_path,
         }
     }
 }
 
+/// A KVM virtual machine object shared by VM and vCPU file handles.
+pub(crate) struct KvmVm {
+    inner: Mutex<KvmVmInner>,
+}
+
+impl KvmVm {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(KvmVmInner::new()),
+        }
+    }
+
+    fn set_user_memory_region(&self, region: super::uapi::KvmUserspaceMemoryRegion) -> Result<()> {
+        self.inner
+            .lock()
+            .memory_slots
+            .set_user_memory_region(region)
+    }
+
+    fn register_vcpu_id(&self, id: u32) -> Result<()> {
+        if id >= KVM_MAX_VCPUS {
+            return_errno_with_message!(Errno::EINVAL, "the vCPU id is out of range");
+        }
+
+        let mut inner = self.inner.lock();
+        if !inner.vcpu_ids.insert(id) {
+            return_errno_with_message!(Errno::EINVAL, "the vCPU id already exists");
+        }
+
+        Ok(())
+    }
+}
+
 struct KvmVmInner {
     memory_slots: MemorySlotTable,
+    vcpu_ids: BTreeSet<u32>,
 }
 
 impl KvmVmInner {
     fn new() -> Self {
         Self {
             memory_slots: MemorySlotTable::new(),
+            vcpu_ids: BTreeSet::new(),
         }
     }
 }
@@ -68,11 +109,24 @@ impl FileLike for KvmVmFile {
         dispatch_ioctl!(match raw_ioctl {
             cmd @ SetUserMemoryRegion => {
                 let region = cmd.read()?;
-                self.inner
-                    .lock()
-                    .memory_slots
-                    .set_user_memory_region(region)?;
+                self.vm.set_user_memory_region(region)?;
                 Ok(0)
+            }
+            _cmd @ CreateVcpu => {
+                let id = u32::try_from(raw_ioctl.arg())
+                    .map_err(|_| Error::with_message(Errno::EINVAL, "the vCPU id is too large"))?;
+                let vcpu_file = Arc::new(KvmVcpuFile::new(id, self.vm.clone())?);
+                self.vm.register_vcpu_id(id)?;
+
+                let current_task = Task::current().unwrap();
+                let thread_local = current_task.as_thread_local().unwrap();
+                let fd = {
+                    let file_table = thread_local.borrow_file_table();
+                    let mut file_table_locked = file_table.unwrap().write();
+                    file_table_locked.insert(vcpu_file, FdFlags::empty())
+                };
+
+                Ok(fd.into())
             }
             _ => return_errno_with_message!(Errno::ENOTTY, "the ioctl command is unknown"),
         })

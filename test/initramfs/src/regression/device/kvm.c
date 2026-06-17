@@ -142,6 +142,31 @@ FN_TEST(kvm_set_user_memory_region)
 }
 END_TEST()
 
+FN_TEST(kvm_create_vcpu)
+{
+	int fd = TEST_SUCC(open(KVM_DEVICE, O_RDWR));
+	int vm_fd = TEST_SUCC(ioctl(fd, KVM_CREATE_VM, 0));
+	int mmap_size = TEST_SUCC(ioctl(fd, KVM_GET_VCPU_MMAP_SIZE));
+
+	int vcpu_fd = TEST_SUCC(ioctl(vm_fd, KVM_CREATE_VCPU, 0));
+	TEST_ERRNO(ioctl(vm_fd, KVM_CREATE_VCPU, 0), EINVAL);
+	TEST_ERRNO(ioctl(vm_fd, KVM_CREATE_VCPU, 1), EINVAL);
+	TEST_ERRNO(ioctl(vcpu_fd, KVM_CREATE_VCPU, 0), ENOTTY);
+
+	struct kvm_run *run =
+		TEST_SUCC(mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,
+			       MAP_SHARED, vcpu_fd, 0));
+	TEST_RES(run->exit_reason, _ret == 0);
+	run->immediate_exit = 1;
+	TEST_RES(run->immediate_exit, _ret == 1);
+
+	TEST_SUCC(munmap(run, mmap_size));
+	TEST_SUCC(close(vcpu_fd));
+	TEST_SUCC(close(vm_fd));
+	TEST_SUCC(close(fd));
+}
+END_TEST()
+
 static void exit_if_kvm_is_unavailable(void)
 {
 	int fd = open(KVM_DEVICE, O_RDWR);

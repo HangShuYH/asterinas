@@ -5,4 +5,5 @@
 pub(crate) mod arch;
 pub(crate) mod memory;
 pub(crate) mod uapi;
+pub(crate) mod vcpu;
 pub(crate) mod vm;
