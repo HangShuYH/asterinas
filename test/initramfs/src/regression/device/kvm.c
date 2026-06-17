@@ -7,9 +7,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kvm.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include "../common/test.h"
@@ -74,6 +76,68 @@ FN_TEST(kvm_create_vm)
 
 	TEST_ERRNO(ioctl(fd, KVM_CREATE_VM, 1), EINVAL);
 
+	TEST_SUCC(close(fd));
+}
+END_TEST()
+
+FN_TEST(kvm_set_user_memory_region)
+{
+	long page_size = TEST_RES(sysconf(_SC_PAGESIZE), _ret > 0);
+	int fd = TEST_SUCC(open(KVM_DEVICE, O_RDWR));
+	int vm_fd = TEST_SUCC(ioctl(fd, KVM_CREATE_VM, 0));
+	char *mem = TEST_SUCC(mmap(NULL, page_size * 3, PROT_READ | PROT_WRITE,
+				   MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+	struct kvm_userspace_memory_region region = {
+		.slot = 0,
+		.flags = 0,
+		.guest_phys_addr = 0,
+		.memory_size = page_size,
+		.userspace_addr = (uintptr_t)mem,
+	};
+
+	TEST_SUCC(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region));
+
+	region.slot = 1;
+	region.userspace_addr = (uintptr_t)(mem + page_size);
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.guest_phys_addr = page_size;
+	TEST_SUCC(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region));
+
+	region.slot = 2;
+	region.guest_phys_addr = 2 * page_size;
+	region.userspace_addr = (uintptr_t)(mem + 1);
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.userspace_addr = (uintptr_t)(mem + 2 * page_size);
+	region.memory_size = page_size - 1;
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.guest_phys_addr = 2 * page_size + 1;
+	region.memory_size = page_size;
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.guest_phys_addr = 2 * page_size;
+	region.flags = KVM_MEM_LOG_DIRTY_PAGES;
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.flags = 0;
+	region.slot = 1000000;
+	TEST_ERRNO(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region), EINVAL);
+
+	region.slot = 0;
+	region.guest_phys_addr = 0;
+	region.memory_size = 0;
+	region.userspace_addr = (uintptr_t)mem;
+	TEST_SUCC(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region));
+
+	region.slot = 1;
+	region.guest_phys_addr = page_size;
+	region.userspace_addr = (uintptr_t)(mem + page_size);
+	TEST_SUCC(ioctl(vm_fd, KVM_SET_USER_MEMORY_REGION, &region));
+
+	TEST_SUCC(munmap(mem, page_size * 3));
+	TEST_SUCC(close(vm_fd));
 	TEST_SUCC(close(fd));
 }
 END_TEST()

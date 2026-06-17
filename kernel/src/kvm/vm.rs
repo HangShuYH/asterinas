@@ -4,6 +4,7 @@
 
 use core::fmt::Display;
 
+use super::{memory::MemorySlotTable, uapi::ioctl_defs};
 use crate::{
     events::IoEvents,
     fs::{
@@ -13,10 +14,12 @@ use crate::{
     },
     prelude::*,
     process::signal::{PollHandle, Pollable},
+    util::ioctl::{RawIoctl, dispatch_ioctl},
 };
 
 /// A VM file handle created by `KVM_CREATE_VM`.
 pub(crate) struct KvmVmFile {
+    inner: Mutex<KvmVmInner>,
     pseudo_path: Path,
 }
 
@@ -25,7 +28,22 @@ impl KvmVmFile {
     pub(crate) fn new() -> Self {
         let pseudo_path = AnonInodeFs::new_path(|_| "anon_inode:[kvm-vm]".to_string());
 
-        Self { pseudo_path }
+        Self {
+            inner: Mutex::new(KvmVmInner::new()),
+            pseudo_path,
+        }
+    }
+}
+
+struct KvmVmInner {
+    memory_slots: MemorySlotTable,
+}
+
+impl KvmVmInner {
+    fn new() -> Self {
+        Self {
+            memory_slots: MemorySlotTable::new(),
+        }
     }
 }
 
@@ -42,6 +60,22 @@ impl FileLike for KvmVmFile {
 
     fn path(&self) -> &Path {
         &self.pseudo_path
+    }
+
+    fn ioctl(&self, raw_ioctl: RawIoctl) -> Result<i32> {
+        use ioctl_defs::*;
+
+        dispatch_ioctl!(match raw_ioctl {
+            cmd @ SetUserMemoryRegion => {
+                let region = cmd.read()?;
+                self.inner
+                    .lock()
+                    .memory_slots
+                    .set_user_memory_region(region)?;
+                Ok(0)
+            }
+            _ => return_errno_with_message!(Errno::ENOTTY, "the ioctl command is unknown"),
+        })
     }
 
     fn dump_proc_fdinfo(self: Arc<Self>, fd_flags: FdFlags) -> Box<dyn Display> {
