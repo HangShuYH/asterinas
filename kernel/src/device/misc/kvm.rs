@@ -15,6 +15,7 @@ use crate::{
         vfs::inode::FileOps,
     },
     kvm::{
+        capability::check_extension,
         uapi::{KVM_API_VERSION, KVM_VCPU_MMAP_SIZE, ioctl_defs},
         vm::KvmVmFile,
     },
@@ -120,9 +121,7 @@ impl PerOpenFileOps for KvmFile {
                 Ok(fd.into())
             }
             _cmd @ CheckExtension => {
-                // Report no capabilities until each one has a complete ioctl implementation
-                // behind it.
-                Ok(0)
+                Ok(check_extension(raw_ioctl.arg()))
             }
             _cmd @ GetVcpuMmapSize => {
                 Ok(KVM_VCPU_MMAP_SIZE)

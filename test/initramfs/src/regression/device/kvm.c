@@ -41,11 +41,12 @@ FN_TEST(kvm_check_extension)
 	int fd = TEST_SUCC(open(KVM_DEVICE, O_RDWR));
 
 	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_USER_MEMORY),
-		 _ret == 0);
-	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_NR_VCPUS), _ret == 0);
-	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS),
-		 _ret == 0);
-	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_MAX_VCPUS), _ret == 0);
+		 _ret == 1);
+	int nr_vcpus = TEST_RES(
+		ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_NR_VCPUS), _ret > 0);
+	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS), _ret > 0);
+	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, KVM_CAP_MAX_VCPUS),
+		 _ret >= nr_vcpus);
 	TEST_RES(ioctl(fd, KVM_CHECK_EXTENSION, -1), _ret == 0);
 
 	TEST_SUCC(close(fd));
